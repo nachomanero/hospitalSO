@@ -1,118 +1,137 @@
+#include "../include/hospital.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include <unistd.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <stdbool.h>
-#include <mqueue.h>
 #include <string.h>
-#define MAX_MSG_SIZE 128
-#define QUEUE_NAME "/hospital_queue"
+#include <time.h>
+#include <sys/wait.h>
 
+// Variables globales
+int pacientes_dados_de_alta = 0;
+mqd_t cola_recepcion;
 sem_t sem_diagnostico, sem_farmacia;
-mqd_t queue;
-pid_t pid_recepcion, pid_hospital;
+pid_t pid_hospital, pid_recepcion;
 
-void manejador_SIGINT(int signum) {
-    printf("\n[INFO] Capturando SIGINT. Cerrando recursos...\n");
-    mq_close(queue);
-    mq_unlink(QUEUE_NAME);
-    sem_destroy(&sem_diagnostico);
-    sem_destroy(&sem_farmacia);
-    exit(0);
+// Generar tiempos aleatorios
+int tiempo_aleatorio(int min, int max) {
+    return rand() % (max - min + 1) + min;
 }
 
+// Manejador de señales
+void manejador_senal(int signum) {
+    if (signum == SIGUSR1) {
+        pacientes_dados_de_alta++;
+        printf("[Recepción] Paciente dado de alta. Total: %d\n", pacientes_dados_de_alta);
+    } else if (signum == SIGINT) {
+        printf("\n[Hospital] Señal SIGINT recibida. Cerrando programa y liberando recursos...\n");
+        mq_unlink(COLA_RECEPCION);
+        sem_destroy(&sem_diagnostico);
+        sem_destroy(&sem_farmacia);
+        exit(0);
+    }
+}
+
+// Hilo de exploración
 void* exploracion(void* args) {
-    char paciente[MAX_MSG_SIZE];
-    printf("[Exploración] Iniciando...\n");
+    printf("[Exploración] Comienzo mi ejecución...\n");
+    char paciente[128];
     while (1) {
-        mq_receive(queue, paciente, MAX_MSG_SIZE, NULL);
-        printf("[Exploración] Recibido paciente: %s. Explorando...\n", paciente);
-        sleep(rand() % 3 + 1);
-        printf("[Exploración] Exploración completada. Notificando diagnóstico...\n");
+        printf("[Exploración] Esperando un paciente...\n");
+        if (mq_receive(cola_recepcion, paciente, sizeof(paciente), NULL) == -1) {
+            perror("[Exploración] Error al recibir mensaje");
+            continue;
+        }
+        printf("[Exploración] Recibido paciente: %s. Realizando exploración...\n", paciente);
+        sleep(tiempo_aleatorio(1, 3));
+        printf("[Exploración] Exploración completa. Notificando diagnóstico...\n");
         sem_post(&sem_diagnostico);
     }
-    return NULL;
 }
 
+// Hilo de diagnóstico
 void* diagnostico(void* args) {
-    printf("[Diagnóstico] Iniciando...\n");
+    printf("[Diagnóstico] Comienzo mi ejecución...\n");
     while (1) {
         sem_wait(&sem_diagnostico);
-        printf("[Diagnóstico] Realizando diagnóstico...\n");
-        sleep(rand() % 5 + 5);
+        printf("[Diagnóstico] Realizando pruebas diagnósticas...\n");
+        sleep(tiempo_aleatorio(5, 10));
         printf("[Diagnóstico] Diagnóstico completado. Notificando farmacia...\n");
         sem_post(&sem_farmacia);
     }
-    return NULL;
 }
 
+// Hilo de farmacia
 void* farmacia(void* args) {
-    printf("[Farmacia] Iniciando...\n");
+    printf("[Farmacia] Comienzo mi ejecución...\n");
     while (1) {
         sem_wait(&sem_farmacia);
         printf("[Farmacia] Preparando medicación...\n");
-        sleep(rand() % 3 + 1);
-        printf("[Farmacia] Medicación lista. Notificando alta...\n");
-        kill(pid_recepcion, SIGUSR1);
-    }
-    return NULL;
-}
-
-void proceso_recepcion() {
-    char paciente[MAX_MSG_SIZE];
-    signal(SIGUSR1, manejador_SIGINT);
-    printf("[Recepción] Iniciando...\n");
-    while (1) {
-        snprintf(paciente, MAX_MSG_SIZE, "Paciente_%d", rand() % 100);
-        printf("[Recepción] Registrando paciente: %s...\n", paciente);
-        mq_send(queue, paciente, strlen(paciente) + 1, 0);
-        sleep(rand() % 5 + 1);
+        sleep(tiempo_aleatorio(1, 3));
+        printf("[Farmacia] Medicación lista. Enviando señal de alta...\n");
+        kill(getppid(), SIGUSR1);
     }
 }
 
-void proceso_hospital() {
-    pthread_t hilo_exploracion, hilo_diagnostico, hilo_farmacia;
+int main(int argc, char* argv[]) {
+    srand(time(NULL));
 
-    sem_init(&sem_diagnostico, 0, 0);
-    sem_init(&sem_farmacia, 0, 0);
-    pthread_create(&hilo_exploracion, NULL, exploracion, NULL);
-    pthread_create(&hilo_diagnostico, NULL, diagnostico, NULL);
-    pthread_create(&hilo_farmacia, NULL, farmacia, NULL);
-    pthread_join(hilo_exploracion, NULL);
-    pthread_join(hilo_diagnostico, NULL);
-    pthread_join(hilo_farmacia, NULL);
-}
+    // Configurar manejadores de señales
+    signal(SIGUSR1, manejador_senal);
+    signal(SIGINT, manejador_senal);
 
-int main() {
-    signal(SIGINT, manejador_SIGINT);
-    struct mq_attr attr;
-    attr.mq_flags = 0;
-    attr.mq_maxmsg = 10;
-    attr.mq_msgsize = MAX_MSG_SIZE;
-    attr.mq_curmsgs = 0;
-
-    queue = mq_open(QUEUE_NAME, O_CREAT | O_RDWR, 0644, &attr);
-    if (queue == -1) {
-        perror("[ERROR] Error al crear la cola de mensajes");
-        exit(1);
-    }
-
+    // Crear proceso recepción
     pid_recepcion = fork();
-
     if (pid_recepcion == 0) {
-        // Proceso Recepción
-        proceso_recepcion();
+        printf("[Recepción] Comienzo mi ejecución...\n");
+
+        struct mq_attr attr = {0, 10, 128, 0};
+        cola_recepcion = mq_open(COLA_RECEPCION, O_CREAT | O_WRONLY, 0644, &attr);
+        if (cola_recepcion == (mqd_t)-1) {
+            perror("[Recepción] Error al abrir la cola de mensajes");
+            exit(EXIT_FAILURE);
+        }
+
+        for (int i = 1;; i++) {
+            char paciente[128];
+            snprintf(paciente, sizeof(paciente), "Paciente %d", i);
+            printf("[Recepción] Registrando nuevo paciente: %s\n", paciente);
+            if (mq_send(cola_recepcion, paciente, strlen(paciente) + 1, 0) == -1) {
+                perror("[Recepción] Error al enviar mensaje");
+                continue;
+            }
+            sleep(tiempo_aleatorio(1, 10));
+        }
     } else {
+        // Crear proceso hospital
         pid_hospital = fork();
         if (pid_hospital == 0) {
-            // Proceso Hospital
-            proceso_hospital();
+            printf("[Hospital] Comienzo mi ejecución...\n");
+
+            cola_recepcion = mq_open(COLA_RECEPCION, O_CREAT | O_RDONLY, 0644, NULL);
+            if (cola_recepcion == (mqd_t)-1) {
+                perror("[Hospital] Error al abrir la cola de mensajes");
+                exit(EXIT_FAILURE);
+            }
+
+            sem_init(&sem_diagnostico, 0, 0);
+            sem_init(&sem_farmacia, 0, 0);
+
+            pthread_t hilo_exploracion, hilo_diagnostico, hilo_farmacia;
+            pthread_create(&hilo_exploracion, NULL, exploracion, NULL);
+            pthread_create(&hilo_diagnostico, NULL, diagnostico, NULL);
+            pthread_create(&hilo_farmacia, NULL, farmacia, NULL);
+
+            pthread_join(hilo_exploracion, NULL);
+            pthread_join(hilo_diagnostico, NULL);
+            pthread_join(hilo_farmacia, NULL);
+
+            sem_destroy(&sem_diagnostico);
+            sem_destroy(&sem_farmacia);
+            mq_close(cola_recepcion);
+            mq_unlink(COLA_RECEPCION);
         } else {
-            // Proceso Padre
-            wait(NULL); // Espera a que terminen los hijos
+            wait(NULL);
+            wait(NULL);
         }
     }
 
