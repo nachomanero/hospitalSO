@@ -8,4 +8,5 @@ Para ejecutar el proyecto ejecutar los siguientes comandos (Windows):
     4. Ejecutar el ejecutable:
         .\hospital
         
-
+Para ejecutar el proyecto ejecutar los siguientes comandos (Ubuntu):
+    
