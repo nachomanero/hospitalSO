@@ -1,0 +1,62 @@
+Informe sobre el Sistema Hospitalario Simulado
+Diseño del Sistema
+El programa simula un sistema hospitalario dividido en tres grandes funcionalidades: recepción, exploración/diagnóstico y farmacia. Cada funcionalidad tiene su rol  definido y se implementa mediante una combinación de procesos, hilos y mecanismos de sincronización. El sistema está diseñado para procesar pacientes de manera concurrente, donde los procesos e hilos trabajan de forma sincronizada con un flujo controlado y eficiente.   
+Distribución de Responsabilidades
+
+Proceso Recepción:
+-Se encarga de registrar nuevos pacientes en el sistema.			
+-Envía los datos del paciente a una cola de mensajes para ser procesados por el hospital.					
+				-Genera pacientes de forma indefinida y simula un tiempo aleatorio de espera entre registros.
+
+Proceso Hospital:
+-Recibe pacientes desde la cola de mensajes proporcionada por la recepción.								
+-Gestiona tres hilos que representan las etapas del hospital:
+        Hilo Exploración: Realiza una evaluación inicial del paciente.
+        Hilo Diagnóstico: Realiza pruebas y diagnósticos basados en la exploración inicial.
+        Hilo Farmacia: Prepara la medicación y da de alta al paciente.
+
+Sincronización entre Procesos e Hilos:
+    -Los procesos (recepción y hospital) están conectados mediante una cola de mensajes para el intercambio de datos (pacientes).
+    -Los hilos dentro del proceso hospitalario están sincronizados utilizando semáforos para asegurar el flujo de las etapas:
+                Exploración -> Diagnóstico -> Farmacia.
+    Las señales se utilizan para manejar eventos globales, como el cierre del sistema y/o el alta de pacientes.
+
+Mecanismos de Sincronización
+Colas de Mensajes (mq_open, mq_send, mq_receive):
+    Función: Implementa la comunicación entre procesos.
+    -La recepción utiliza una cola de mensajes para enviar datos de los pacientes al proceso hospital.
+    -La cola la hemos configurado con el atributo (mq_attr) como tamaño del mensaje y número máximo de mensajes en la cola.
+Semáforos (sem_init, sem_post, sem_wait):
+    Función: Sincroniza los hilos dentro del proceso hospital.
+    sem_diagnostico:
+        Se libera el hilo de exploración para notificar que un paciente está listo para el diagnóstico.
+        Lo “recibe” el hilo de diagnóstico antes de procesar.
+    sem_farmacia:
+        Se libera el hilo de diagnóstico para notificar que un paciente está listo para la farmacia.
+        Lo “recibe” el hilo de farmacia antes de preparar la medicación.
+Señales (signal, kill):
+    Función: Gestiona las notificaciones entre procesos.
+    SIGUSR1:
+        La envia el hilo de farmacia al proceso de recepción para indicar que un paciente ha sido dado de alta.
+        Incrementa un contador global de pacientes dados de alta.
+    SIGINT:
+        Se usa para finalizar el programa, liberando recursos (semáforos y colas de mensajes).
+
+Descripción del Flujo
+Proceso Recepción:
+    -Genera pacientes con identificadores únicos.			
+	-Envía los datos del paciente a través de la cola de mensajes.	
+	-Simula el tiempo de espera entre la llegada de pacientes.
+Proceso Hospital:
+Descompone el flujo hospitalario en tres hilos que ejecutan en paralelo:
+    -Exploración:
+         Recibe pacientes desde la cola de mensajes.Igualmente,simula un tiempo de exploración.Y por último,libera el semáforo sem_diagnostico para que comience el diagnóstico.
+    -Diagnóstico:
+        Espera al semáforo sem_diagnostico antes de comenzar con la ejecución.Simula un tiempo aleatorio de diagnóstico.Cuando acaba, libera el semáforo sem_farmacia para que la farmacia prepare la medicación.
+    Farmacia:
+        Espera el semáforo sem_farmacia antes de comenzar con la ejecución.Simula un tiempo aleatorio de la preparación de medicación.Y para acabar,envía una señal SIGUSR1 al proceso de recepción indicando que el paciente ha sido dado de alta.
+    Finalización del Programa:
+        Al recibir SIGINT, se cierran y destruyen los recursos:
+                -Cola de mensajes (mq_unlink).
+                -Semáforos (sem_destroy).
+        Los procesos e hilos se terminan junto con la ejecución.
