@@ -157,7 +157,7 @@ int main(int argc, char* argv[]) {
             sem_destroy(&sem_diagnostico);
             sem_destroy(&sem_farmacia);
             mq_close(cola_recepcion);
-            mq_unlink(COLA_RECEPCION);
+            //mq_unlink(COLA_RECEPCION);
         } else {
             wait(NULL);
             wait(NULL);
