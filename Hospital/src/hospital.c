@@ -153,9 +153,9 @@ int main(int argc, char* argv[]) {
             pthread_join(hilo_exploracion, NULL);
             pthread_join(hilo_diagnostico, NULL);
             pthread_join(hilo_farmacia, NULL);
-           //liberacion de recursos
-            sem_destroy(&sem_diagnostico);
-            sem_destroy(&sem_farmacia);
+           
+            //sem_destroy(&sem_diagnostico);
+            //sem_destroy(&sem_farmacia);
             mq_close(cola_recepcion);
             //mq_unlink(COLA_RECEPCION);
         } else {
